@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<head>
+  <title>Earthquake Explorer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta charset="utf-8">
+<link rel="stylesheet" href="plugins/leaflet.css" />
+<link rel="stylesheet" href="plugins/leaflet.zoomhome.css" />
+<link rel="stylesheet" href="plugins/bootstrap.min.css">
+<link rel="stylesheet" href="plugins/Control.Geocoder.css" />
+<link rel="stylesheet" href="plugins/L.Control.Locate.css" />
+<link rel="stylesheet" href="plugins/L.Control.ZoomBox.css" />
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.3.0/css/font-awesome.min.css"/>
+<link rel="stylesheet" href="quakestyles.css" />
+
+<script src="plugins/jquery-3.6.0.min.js"></script>
+<script src="plugins/leaflet.js"></script>
+<script src="plugins/leaflet.ajax.js"></script>
+<script src="plugins/leaflet.zoomhome.js"></script>
+<script src="plugins/Control.Geocoder.js"></script>
+<script src='plugins/turf.min.js'></script>
+<script src="plugins/L.Control.Locate.js"></script>
+<script src="plugins/L.Control.ZoomBox.min.js"></script>
+<script src="plugins/Leaflet.VectorGrid.bundled.js"></script>
+</head>
+
+<body>
+    <div id="map"></div>
+    <script>
+    var mapboxApiKey = 'pk.eyJ1IjoicnphZ2hhMSIsImEiOiJjaXVwcDAwZHkwMjBpMnRwNHpmMWIzcTc3In0.iZVkJccpQ8WZp3YnvAKbIg';
+	var map = L.map('map', {
+		zoomControl: false,
+		attribution: 'Ziggy Spatial LLC'
+	}).setView([40,-110.0976387], 5);
+		
+	var grayscale = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+		attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+		maxZoom: 16
+	}).addTo(map);
+    
+    var zoomHome = L.Control.zoomHome().addTo(map);	
+
+    var control = L.control.zoomBox({modal: true});
+        map.addControl(control);
+
+    //side bar controls
+    lc = L.control.locate({        
+        strings: {
+            title: "Show me where I am"
+        }
+    }).addTo(map);
+
+    //geocoder
+    var geocoder = L.Control.Geocoder.mapbox({
+        apiKey: mapboxApiKey
+    });
+
+    if (typeof URLSearchParams !== 'undefined' && location.search) {
+        // parse /?geocoder=nominatim from URL
+        var params = new URLSearchParams(location.search);
+        var geocoderString = params.get('geocoder');
+        if (geocoderString && L.Control.Geocoder[geocoderString]) {
+            geocoder = L.Control.Geocoder[geocoderString]();
+        } else if (geocoderString) {
+            console.warn('Unsupported geocoder', geocoderString);
+        }
+    }
+    var line;
+    var control = L.Control.geocoder({
+        placeholder: 'Find the closest Earthquake to your location',
+        collapsed: false,
+        position: 'topright',
+        geocoder: geocoder
+    }).on('markgeocode', function(e) {
+        if (line != undefined) {
+            map.removeLayer(line);
+        };
+        loc=turf.point([e.geocode.center['lng'],e.geocode.center['lat']]);        
+        var pt=turf.nearestPoint(loc,all_day_points.toGeoJSON());
+        var dist=Math.round(turf.distance(loc,pt,{units: 'miles'}));
+        e.geocode.name="<b>Address:</b>"+e.geocode.name + "<br>"+
+                        "<b>Closest Earthquake: </b>"+pt.properties.place+"<br>"+
+                        "<b>Magnitude: </b>"+ pt.properties.mag+"<br>"+
+                        "<b>Time and Date of Earthquake: </b>"+ new Date(pt.properties.time)+"<br>"+
+                        "<b>Distance To Location: </b>"+dist+" Miles";
+        line=L.geoJSON(turf.greatCircle(loc,pt));
+        e.geocode.bbox=line.getBounds();        
+        line.bindPopup(e.geocode.name).addTo(map).openPopup();
+        map.fitBounds(line.getBounds(), {padding: [250,250]});    
+    }).addTo(map);
+
+    var plates=L.layerGroup();
+    $.getJSON('data/plates_poly.geojson', function(data) {
+        L.vectorGrid.slicer(data, { 
+            interactive: true,
+            zIndex: 2,
+                vectorTileLayerStyles: {
+                    sliced: {
+                        radius: 1,
+                        fill: true,
+                        fillOpacity: 0,
+                        weight: 2,
+                        color: 'black',
+                    }
+                }
+            }).on('click', function(e) {
+			var properties = e.layer.properties;
+			var popup_header;
+			popup_header = 'Plate Name: '+properties.PlateName;
+			var popup =  L.popup({
+				})
+				.setLatLng(e.latlng)
+				.setContent(popup_header)
+				.openOn(map);
+				makeDraggable(popup);
+		}).addTo(plates);
+    });
+
+    plates.addTo(map);
+
+    function colors(magnitude){
+        if (magnitude < 1.5){
+            return{
+                color: "green",
+                fillOpacity: 0.5
+            }
+        }
+        else if (magnitude <3.5 && magnitude >=1.5){
+            return{
+                color: "grey",
+                fillOpacity: 0.5
+            }
+        }
+        else if (magnitude <5 && magnitude >=3.5){
+            return{
+                color: "purple",
+                fillOpacity: 0.5
+            }
+        }
+        else if (magnitude >=5 && magnitude <7){
+            return{
+                color: 'Orange',
+                fillOpacity: 0.5
+                }
+            }
+        else if (magnitude >=7){
+            return{
+                color: 'Black',
+                fillOpacity: 0.5
+                }
+            }
+        
+        else return{
+                    color: 'black',
+                    fillOpacity: 0.5
+                };                        
+    };
+
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var all_day_polygons=L.layerGroup();
+    var all_day_points=L.geoJSON();
+    $.getJSON("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/1.0_week.geojson", function(data) {
+            L.geoJSON(data, {
+                    onEachFeature: function(feature,layer){
+                                layer.bindPopup('<b>Magnitude</b>= '+feature.properties.mag+'<br>'+
+                                                '<b>Place</b>= '+feature.properties.place+'<br>').openPopup();
+                                var magnitude=feature.properties.mag;
+                                var place=feature.properties.place;
+
+                                var buffed=turf.buffer(feature.geometry,magnitude*10);
+                                buffed.properties['mag'] = feature.properties.mag;
+                                buffed.properties['place'] = feature.properties.place;
+
+                                var deight=new Date(feature.properties.time);
+                                var month = months[deight.getMonth()];
+                                var date = deight.getDate();
+                                var hour = deight.getHours();
+                                buffed.properties['time']=month+' '+date+'th';
+                                L.geoJSON(buffed, {
+                                  style: colors(magnitude)
+                                }).addTo(all_day_polygons);                                               
+                            }
+                        }).addTo(all_day_points);
+    });
+    
+    all_day_polygons.addTo(map);     
+    
+    var info = L.control({ position: 'topright' });   
+    var selected_geom={};
+    info.onAdd = function (map) {
+        cont = L.DomUtil.create('div', 'info'); 
+        cont.style.backgroundColor = 'white';
+        cont.type="button";
+        var n=0;
+        cont.onclick=function(){
+            try{
+                info.update(layer_selection[Object.keys(layer_selection)[n]]);
+                var geom=layer_selection[Object.keys(layer_selection)[n]]['geometry'];
+                if (selected_geom != undefined) {
+                    map.removeLayer(selected_geom);
+                };
+                selected_geom=L.geoJSON(geom,{
+                    style: {"color": "#ff00bf",
+                            "weight": 10,
+                            "opacity": 1
+                            }
+                    }).addTo(map);
+                n=(n+1);
+            }
+            catch(e){
+                layer_selection={};
+                n=0;
+                map.eachLayer(function(layer) {
+                    if (layer instanceof L.GeoJSON) {
+                        layer.eachLayer(function(l){layer.resetStyle(l)})
+                    }
+                });
+                    if (selected_geom != undefined) {
+                        map.removeLayer(selected_geom);
+                };
+            }
+          };
+        this.update();
+        return cont;
+    };
+    info.update = function (props) {
+        cont.innerHTML = '<h5>Click Here For Earthquake Info</h5>' +  (props ? '<b>Magnitude: '+ props.mag +'<br>Place: '+props.place+'<br>Date: '+props.time: '');        
+    };
+
+    pineapple_icon=L.icon({
+        iconUrl: 'https://i.ibb.co/YhZ9xr1/pineapple.png',
+        iconSize:     [15, 15],
+        iconAnchor:   [10, 10],
+    });
+
+    function ProcessClick(lat,lng,ls={}){
+        if (theMarker != undefined) {
+            map.removeLayer(theMarker);
+        };
+        theMarker=L.marker([lat,lng],{icon: pineapple_icon}).addTo(map);
+        var i = 0;
+        map.eachLayer(function(layer) {
+            if (layer instanceof L.GeoJSON) {
+                layer.eachLayer(function(layer2) {
+                    var click_intersection = turf.inside(theMarker.toGeoJSON(), layer2.toGeoJSON());
+                    if (click_intersection) {
+                        layer2.setStyle({fillColor: '#ffff00', opacity: 0.8});
+                        i++;
+                        props=layer2.feature.properties;
+                        props['geometry']=layer2.toGeoJSON();
+                        ls[i]=props;
+                    };
+                });
+            }
+            
+        });
+    };
+
+    var theMarker=L.marker([40,-74],{icon: pineapple_icon}).addTo(map);
+    layer_selection={};
+    map.on('click', function(e) {
+        var lat = e.latlng.lat;
+        var lng = e.latlng.lng;
+        ProcessClick(lat,lng,layer_selection);
+    });  
+
+	var legend = L.control({ position: "topright" });
+	legend.onAdd = function(map) {
+		var div = L.DomUtil.create("div", "legend");
+		div.innerHTML += "<h4>Magnitude</h4>";
+		div.innerHTML += '<i style="background: green"></i><span> < 1.5 </span><br>';
+		div.innerHTML += '<i style="background: grey"></i><span>1.5--3.5 </span><br>';
+		div.innerHTML += '<i style="background: purple"></i><span> 3.5--5 </span><br>';
+		div.innerHTML += '<i style="background: Orange"></i><span> > 5 -7 </span><br>';
+        div.innerHTML += '<i style="background: Black"></i><span> > 7 </span><br>';
+		return div;
+	};
+
+
+	///////basemaps///////
+	var satellite = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+		zIndex: 0,
+		maxZoom: 21,
+		attribution: 'Ziggy Spatial LLC'
+	});
+
+	streets = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{
+		maxZoom: 21,
+		subdomains:['mt0','mt1','mt2','mt3'],
+		attribution: 'Ziggy Spatial LLC'
+	});	
+
+    objBaseMaps = {
+				'Grayscale': grayscale,
+				"Streets": streets,
+				"Satellite": satellite
+		};
+    var overlayMaps = {
+                "Earthquakes in last 7 days": all_day_polygons,
+                "Earth Plates": plates
+        };
+    var layerControl = L.control.layers(objBaseMaps, overlayMaps,{'collapsed': false,autoZIndex: false}).addTo(map);
+    legend.addTo(map);
+    info.addTo(map);
+    </script>
+</body>
+</html>
