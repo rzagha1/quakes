@@ -1,1 +1,1 @@
-<a href="https://rzagha1.github.io/quakes">Earthquake Appa</a>
+<a href="https://rzagha1.github.io/quakes">Earthquake App</a>
